@@ -44,6 +44,14 @@ impl App {
             }
         })
     }
+
+    pub fn init_vulkan() {
+
+    }
+
+    pub fn clean_up() {
+        
+    }
 }
 
 
