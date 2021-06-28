@@ -1,9 +1,16 @@
 use winit::event::{Event, VirtualKeyCode, ElementState,KeyboardInput, WindowEvent};
 use winit::event_loop::{EventLoop, ControlFlow};
+use winit::window::Window;
 
 use ash::{vk, version::EntryV1_0, version::InstanceV1_0};
 use std::ffi::CString;
 use std::ptr;
+
+#[cfg(target_os = "windows")]
+use ash::extensions::khr::Win32Surface;
+
+use ash::extensions::ext::DebugUtils;
+use ash::extensions::khr::Surface;
 
 const WINDOW_TITLE: &str = "01 instance creation";
 const WINDOW_WIDTH: u32 = 800;
@@ -11,6 +18,15 @@ const WINDOW_HEIGHT: u32 = 600;
 
 pub const APPLICATION_VERSION: u32 = 1;
 pub const ENGINE_VERSION: u32 = 1;
+
+#[cfg(all(windows))]
+pub fn required_extension_names() -> Vec<*const i8> {
+    vec![
+        Surface::name().as_ptr(),
+        Win32Surface::name().as_ptr(),
+        DebugUtils::name().as_ptr(),
+    ]
+}
 
 struct App {
     entry: ash::Entry,
@@ -41,16 +57,18 @@ impl App {
             api_version: vk::API_VERSION_1_0
         };
 
-        // let extension_names = 
+        
+        let extension_names = required_extension_names();
 
         let instance_create_info = vk::InstanceCreateInfo {
             s_type: vk::StructureType::INSTANCE_CREATE_INFO,
             p_next: ptr::null(),
+            flags: vk::InstanceCreateFlags::default(),
             p_application_info: &app_info,
             pp_enabled_layer_names: ptr::null(),
             enabled_layer_count: 0,
-            pp_enabled_extension_names: ptr::null(),
-            enabled_extension_count: 0,
+            pp_enabled_extension_names: extension_names.as_ptr(),
+            enabled_extension_count: extension_names.len() as u32 , 
         };
 
         unsafe {
@@ -71,8 +89,8 @@ impl App {
 
     }
 
-    pub fn main_loop(event_loop: EventLoop<()>) {
-        event_loop.run(|event, _, control_flow| {
+    pub fn main_loop(mut self, event_loop: EventLoop<()>, window: Window){
+        event_loop.run(move |event, _, control_flow| {
             match event {
                 Event::WindowEvent { event, ..} => {
                     match event {
@@ -95,9 +113,19 @@ impl App {
                         _ => ()
                     }
                 },
+                Event::MainEventsCleared => {
+                    window.request_redraw()
+                },
+                Event::RedrawRequested(_window_id) => {
+                    self.draw_frame();
+                },
                 _ => (),
             }
         })
+    }
+
+    pub fn draw_frame(&mut self) {
+        println!("draw")
     }
 
     pub fn clean_up() {
@@ -109,7 +137,8 @@ impl App {
 
 fn main() {
     let event_loop = EventLoop::new();
+    let app = App::new();
     let _window = App::init_window(&event_loop);
 
-    App::main_loop(event_loop);
+    app.main_loop(event_loop, _window);
 }
