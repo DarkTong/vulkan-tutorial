@@ -3,7 +3,7 @@ use winit::event_loop::{EventLoop, ControlFlow};
 use winit::window::Window;
 
 use ash::{vk, version::EntryV1_0, version::InstanceV1_0};
-use std::ffi::CString;
+use std::ffi::{CStr, CString, c_void};
 use std::ptr;
 
 #[cfg(target_os = "windows")]
@@ -28,19 +28,92 @@ pub fn required_extension_names() -> Vec<*const i8> {
     ]
 }
 
+unsafe extern "system" fn vulkan_debug_utils_debug(
+    message_severity: vk::DebugUtilsMessageSeverityFlagsEXT,
+    message_type: vk::DebugUtilsMessageTypeFlagsEXT,
+    p_callback_data: *const vk::DebugUtilsMessengerCallbackDataEXT,
+    p_use_data: *mut c_void
+) -> vk::Bool32{
+
+    let message_severity_str = match message_severity {
+        vk::DebugUtilsMessageSeverityFlagsEXT::VERBOSE => "[Verbose]",
+        vk::DebugUtilsMessageSeverityFlagsEXT::WARNING => "[Warning]",
+        vk::DebugUtilsMessageSeverityFlagsEXT::ERROR => "[Error]",
+        vk::DebugUtilsMessageSeverityFlagsEXT::INFO => "[Info]",
+        _ => "[Unknown]",
+    };
+
+    let message_type_str = match message_type {
+        vk::DebugUtilsMessageTypeFlagsEXT::GENERAL => "[General]",
+        vk::DebugUtilsMessageTypeFlagsEXT::PERFORMANCE => "[Performance]",
+        vk::DebugUtilsMessageTypeFlagsEXT::VALIDATION => "[Validation]",
+        _ => "[Unknown]",
+    };
+
+    let message = unsafe { CStr::from_ptr((*p_callback_data).p_message) };
+
+    println!("[Debug]{}{}{:?}", message_severity_str, message_type_str, message);
+
+    vk::FALSE
+}
+
+pub fn check_validation_layer_support(
+    entry: &ash::Entry,
+) -> bool {
+    let layer_properties = entry.enumerate_instance_layer_properties()
+        .expect("Failed to enumerate Instance Layers Properties");
+    
+    let mut found = false;
+    for property in layer_properties.iter() {
+        let c_str = unsafe { 
+            let ptr = property.layer_name.as_ptr();
+            CStr::from_ptr(ptr)
+        }.to_str()
+        .expect("Failed to convert vulkan raw pointer");
+
+        if c_str == VALIDATION_INFO.required_validation_layers[0] {
+            found = true;
+        }
+    }
+    return found
+}
+
+pub struct ValidationInfo {
+    pub enable_validation: bool,
+    pub required_validation_layers: [&'static str; 1],
+}
+
+
 struct App {
     entry: ash::Entry,
     instance: ash::Instance,
+    debug_utils_messenger: vk::DebugUtilsMessengerEXT,
 }
+
+
+const VALIDATION_INFO: ValidationInfo = ValidationInfo{
+    enable_validation: true,
+    required_validation_layers: ["VK_LAYER_KHRONOS_validation"]
+};
+
 
 impl App {
     pub fn new() -> App {
         let entry = unsafe { ash::Entry::new().unwrap() };
+
+        if VALIDATION_INFO.enable_validation && !check_validation_layer_support(&entry) {
+            panic!("validation layers requested, but not avaliable!");
+        }
+
         let instance = App::create_vk_instance(&entry);
+
+        let utils_messenger = App::setup_debug_messenger(&entry, &instance);
+
 
         App {
             entry: entry,
-            instance: instance
+            instance: instance,
+            debug_utils_messenger: utils_messenger,
         }
     }
 
@@ -77,6 +150,38 @@ impl App {
         }
     }
 
+    fn setup_debug_messenger(entry: &ash::Entry, instance: &ash::Instance) -> vk::DebugUtilsMessengerEXT {
+        let debug_utils_loader = ash::extensions::ext::DebugUtils::new(entry, instance);
+        if !VALIDATION_INFO.enable_validation {
+            vk::DebugUtilsMessengerEXT::null()
+        }
+        else {
+            let create_info = vk::DebugUtilsMessengerCreateInfoEXT {
+                s_type: vk::StructureType::DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT,
+                p_next: ptr::null(),
+                flags: vk::DebugUtilsMessengerCreateFlagsEXT::empty(),
+                message_severity: vk::DebugUtilsMessageSeverityFlagsEXT::VERBOSE | 
+                    vk::DebugUtilsMessageSeverityFlagsEXT::WARNING |
+                    vk::DebugUtilsMessageSeverityFlagsEXT::ERROR,
+                message_type: vk::DebugUtilsMessageTypeFlagsEXT::GENERAL |
+                    vk::DebugUtilsMessageTypeFlagsEXT::VALIDATION |
+                    vk::DebugUtilsMessageTypeFlagsEXT::PERFORMANCE,
+                pfn_user_callback: Some(vulkan_debug_utils_debug),
+                p_user_data: ptr::null_mut(),
+            };
+
+            let utils_messenger = unsafe { 
+                debug_utils_loader
+                    .create_debug_utils_messenger(&create_info, None)
+                    .expect("Failed to set up debug messenger!")
+            };
+
+            utils_messenger
+        }
+
+        
+    }
+
     fn init_window(event_loop: &EventLoop<()>) -> winit::window::Window {
         winit::window::WindowBuilder::new()
             .with_title(WINDOW_TITLE)
@@ -86,7 +191,7 @@ impl App {
     }
 
     pub fn init_vulkan() {
-
+        
     }
 
     pub fn main_loop(mut self, event_loop: EventLoop<()>, window: Window){
@@ -125,7 +230,7 @@ impl App {
     }
 
     pub fn draw_frame(&mut self) {
-        println!("draw")
+        // println!("draw")
     }
 
     pub fn clean_up() {
