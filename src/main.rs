@@ -1,3 +1,4 @@
+use ash::vk::Handle;
 use winit::event::{Event, VirtualKeyCode, ElementState,KeyboardInput, WindowEvent};
 use winit::event_loop::{EventLoop, ControlFlow};
 use winit::window::Window;
@@ -119,15 +120,55 @@ fn get_debug_messenger(create_info: &vk::DebugUtilsMessengerCreateInfoEXT, debug
         utils_messenger
     }
 }
+
+fn pick_physic_device(instance: &ash::Instance) -> vk::PhysicalDevice {
+    let physical_devices = unsafe {
+        instance.enumerate_physical_devices()
+            .expect("Failed to enumerate Physical Devices!")
+    };
+
+    if physical_devices.len() == 0 {
+        panic!("Failed to find GPUs with vulkan support.");
+    }
+
+    println!(
+        "{} devices (GPU) found with vulkan support.",
+        physical_devices.len()
+    );
+
+    let f_device_suitable = |p_device: &vk::PhysicalDevice|{
+        let p_device_properties = unsafe { 
+            instance.get_physical_device_properties(*p_device)
+        };
+        let p_device_features = unsafe {
+            instance.get_physical_device_features(*p_device)
+        };
+
+        true
+    };
+
+    let mut suitable_device = None;
+    for device in physical_devices.iter() {
+        if f_device_suitable(device) {
+            suitable_device = Some(*device);
+        }
+    }
+    
+    match suitable_device {
+        Some(deivce) => deivce,
+        None => panic!("Failed to find a suitable GPU!")
+    }
+}
+
 pub struct ValidationInfo {
     pub enable_validation: bool,
     pub required_validation_layers: [&'static str; 1],
 }
 
-
 struct App {
     entry: ash::Entry,
     instance: ash::Instance,
+    physical_device: vk::PhysicalDevice,
     debug_utils_loader: ash::extensions::ext::DebugUtils,
     debug_utils_messenger: vk::DebugUtilsMessengerEXT,
 }
@@ -153,9 +194,12 @@ impl App {
         let debug_utils_loader = ash::extensions::ext::DebugUtils::new(&entry, &instance);
         let debug_utils_messenger = get_debug_messenger(&debug_utils_messenger_ci, &debug_utils_loader);
 
+        let physical_device = pick_physic_device(&instance);
+
         App {
             entry: entry,
             instance: instance,
+            physical_device: physical_device,
             debug_utils_loader: debug_utils_loader,
             debug_utils_messenger: debug_utils_messenger,
         }
@@ -222,10 +266,6 @@ impl App {
             .with_inner_size(winit::dpi::LogicalSize::new(WINDOW_WIDTH, WINDOW_HEIGHT))
             .build(event_loop)
             .expect("Failed to create window.")
-    }
-
-    pub fn init_vulkan() {
-        
     }
 
     pub fn main_loop(mut self, event_loop: EventLoop<()>, window: Window){
