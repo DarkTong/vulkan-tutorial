@@ -121,6 +121,35 @@ fn get_debug_messenger(create_info: &vk::DebugUtilsMessengerCreateInfoEXT, debug
     }
 }
 
+fn is_device_suitable(instance: &ash::Instance, p_device: vk::PhysicalDevice) 
+-> bool {
+    let p_device_properties = unsafe { 
+        instance.get_physical_device_properties(p_device)
+    };
+    let p_device_features = unsafe {
+        instance.get_physical_device_features(p_device)
+    };
+    let p_device_queue_families = unsafe {
+        instance.get_physical_device_queue_family_properties(p_device)
+    };
+
+    for queue_family in p_device_queue_families.iter() {
+        let is_graphics_support = queue_family.queue_flags.contains(vk::QueueFlags::GRAPHICS);
+        let is_compute_support = queue_family.queue_flags.contains(vk::QueueFlags::COMPUTE);
+        let is_tranfer_suppoprt = queue_family.queue_flags.contains(vk::QueueFlags::TRANSFER);
+
+        if is_graphics_support 
+            && is_compute_support 
+            && is_tranfer_suppoprt
+            && queue_family.queue_count > 0 
+        {
+            return true;
+        }
+    }
+
+    return false;
+}
+
 fn pick_physic_device(instance: &ash::Instance) -> vk::PhysicalDevice {
     let physical_devices = unsafe {
         instance.enumerate_physical_devices()
@@ -137,20 +166,12 @@ fn pick_physic_device(instance: &ash::Instance) -> vk::PhysicalDevice {
     );
 
     let f_device_suitable = |p_device: &vk::PhysicalDevice|{
-        let p_device_properties = unsafe { 
-            instance.get_physical_device_properties(*p_device)
-        };
-        let p_device_features = unsafe {
-            instance.get_physical_device_features(*p_device)
-        };
-
-        true
     };
 
     let mut suitable_device = None;
-    for device in physical_devices.iter() {
-        if f_device_suitable(device) {
-            suitable_device = Some(*device);
+    for &device in physical_devices.iter() {
+        if is_device_suitable(instance, device) {
+            suitable_device = Some(device);
         }
     }
     
