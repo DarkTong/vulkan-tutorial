@@ -126,8 +126,8 @@ fn get_debug_messenger(create_info: &vk::DebugUtilsMessengerCreateInfoEXT, debug
     }
 }
 
-fn is_device_suitable(instance: &ash::Instance, p_device: vk::PhysicalDevice) 
--> bool {
+fn print_physical_device_info(instance: &ash::Instance, p_device: vk::PhysicalDevice) 
+{
     let p_device_properties = unsafe { 
         instance.get_physical_device_properties(p_device)
     };
@@ -198,22 +198,47 @@ fn is_device_suitable(instance: &ash::Instance, p_device: vk::PhysicalDevice)
         );
     }
 
+
+}
+
+fn find_queue_family(instance: &ash::Instance, p_device: vk::PhysicalDevice) -> QueueFamilyIndices {
+    let p_device_queue_families = unsafe {
+        instance.get_physical_device_queue_family_properties(p_device)
+    };
+    let queue_family_indices = QueueFamilyIndices {
+        graphics_family: None
+    };
+
+    let index = 0u32;
     // 选择设备
     for queue_family in p_device_queue_families.iter() {
         let is_graphics_support = queue_family.queue_flags.contains(vk::QueueFlags::GRAPHICS);
-        let is_compute_support = queue_family.queue_flags.contains(vk::QueueFlags::COMPUTE);
-        let is_tranfer_suppoprt = queue_family.queue_flags.contains(vk::QueueFlags::TRANSFER);
-
-        if is_graphics_support 
-            && is_compute_support 
-            && is_tranfer_suppoprt
-            && queue_family.queue_count > 0 
-        {
-            return true;
+        // let is_compute_support = queue_family.queue_flags.contains(vk::QueueFlags::COMPUTE);
+        // let is_tranfer_suppoprt = queue_family.queue_flags.contains(vk::QueueFlags::TRANSFER);
+        if queue_family.queue_count > 0 {
+            if is_graphics_support 
+                // && is_compute_support 
+                // && is_tranfer_suppoprt
+            {
+                queue_family_indices.graphics_family = Some(index);
+            }
         }
+
+        if queue_family_indices.is_complete() {
+            break;
+        }
+        
+        index += 1;
     }
 
-    return false;
+    queue_family_indices
+}
+
+fn is_device_suitable(instance: &ash::Instance, p_device: vk::PhysicalDevice) 
+-> bool {
+    let queue_family_indices = find_queue_family(instance, p_device);
+    
+    return queue_family_indices.is_complete();
 }
 
 fn pick_physic_device(instance: &ash::Instance) -> vk::PhysicalDevice {
@@ -244,15 +269,47 @@ fn pick_physic_device(instance: &ash::Instance) -> vk::PhysicalDevice {
     }
 }
 
+fn create_logic_device(instance: &ash::Instance, p_device: &vk::PhysicalDevice) -> vk::Device {
+    let queue_family_indices = find_queue_family(instance, p_device);
+
+    let queue_priority = [1.0f32];
+    let device_queue_ci = vk::DeviceQueueCreateInfo {
+        s_type: vk::StructureType::DEVICE_QUEUE_CREATE_INFO,
+        p_next: ptr::null(),
+        flags: vk::DeviceQueueCreateFlags::empty(),
+        queue_family_index: queue_family_indices.graphics_family.unwrap(),
+        queue_count: 1,
+        p_queue_priorities: queue_priority.as_ptr()
+    };
+
+    
+
+
+}
+
 pub struct ValidationInfo {
     pub enable_validation: bool,
     pub required_validation_layers: [&'static str; 1],
+}
+
+struct QueueFamilyIndices {
+    graphics_family: Option<u32>
+}
+
+impl QueueFamilyIndices {
+    pub fn is_complete(&self) -> bool {
+        match self.graphics_family {
+            Some(_) => true,
+            None => false,
+        }
+    }
 }
 
 struct App {
     entry: ash::Entry,
     instance: ash::Instance,
     physical_device: vk::PhysicalDevice,
+    device: vk::Device, // logic device
     debug_utils_loader: ash::extensions::ext::DebugUtils,
     debug_utils_messenger: vk::DebugUtilsMessengerEXT,
 }
