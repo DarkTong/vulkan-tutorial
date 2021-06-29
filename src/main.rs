@@ -59,25 +59,66 @@ unsafe extern "system" fn vulkan_debug_utils_debug(
 
 pub fn check_validation_layer_support(
     entry: &ash::Entry,
+    layers: &[&'static str]
 ) -> bool {
     let layer_properties = entry.enumerate_instance_layer_properties()
         .expect("Failed to enumerate Instance Layers Properties");
-    
-    let mut found = false;
-    for property in layer_properties.iter() {
-        let c_str = unsafe { 
-            let ptr = property.layer_name.as_ptr();
-            CStr::from_ptr(ptr)
-        }.to_str()
-        .expect("Failed to convert vulkan raw pointer");
 
-        if c_str == VALIDATION_INFO.required_validation_layers[0] {
-            found = true;
+    for check_layer in layers.iter() {
+        let mut found = false;
+        for property in layer_properties.iter() {
+            let c_str = unsafe { 
+                let ptr = property.layer_name.as_ptr();
+                CStr::from_ptr(ptr)
+            }.to_str()
+            .expect("Failed to convert vulkan raw pointer");
+
+            if c_str == *check_layer {
+                found = true;
+                break;
+            }   
+        }
+
+        if !found {
+            println!("Failed to find layer {}", *check_layer);
+            return false;
         }
     }
-    return found
+    return true;
 }
 
+fn get_debug_utils_messenger_create_info() 
+-> vk::DebugUtilsMessengerCreateInfoEXT {        
+    vk::DebugUtilsMessengerCreateInfoEXT {
+        s_type: vk::StructureType::DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT,
+        p_next: ptr::null(),
+        flags: vk::DebugUtilsMessengerCreateFlagsEXT::empty(),
+        message_severity: vk::DebugUtilsMessageSeverityFlagsEXT::VERBOSE | 
+            vk::DebugUtilsMessageSeverityFlagsEXT::WARNING |
+            vk::DebugUtilsMessageSeverityFlagsEXT::ERROR,
+        message_type: vk::DebugUtilsMessageTypeFlagsEXT::GENERAL |
+            vk::DebugUtilsMessageTypeFlagsEXT::VALIDATION |
+            vk::DebugUtilsMessageTypeFlagsEXT::PERFORMANCE,
+        pfn_user_callback: Some(vulkan_debug_utils_debug),
+        p_user_data: ptr::null_mut(),
+    }
+}
+
+fn get_debug_messenger(create_info: &vk::DebugUtilsMessengerCreateInfoEXT, debug_utils_loader: &ash::extensions::ext::DebugUtils) 
+-> vk::DebugUtilsMessengerEXT {
+    if !VALIDATION_INFO.enable_validation {
+        vk::DebugUtilsMessengerEXT::null()
+    }
+    else {
+        let utils_messenger = unsafe { 
+            debug_utils_loader
+                .create_debug_utils_messenger(&create_info, None)
+                .expect("Failed to set up debug messenger!")
+        };
+
+        utils_messenger
+    }
+}
 pub struct ValidationInfo {
     pub enable_validation: bool,
     pub required_validation_layers: [&'static str; 1],
@@ -87,6 +128,7 @@ pub struct ValidationInfo {
 struct App {
     entry: ash::Entry,
     instance: ash::Instance,
+    debug_utils_loader: ash::extensions::ext::DebugUtils,
     debug_utils_messenger: vk::DebugUtilsMessengerEXT,
 }
 
@@ -101,25 +143,29 @@ impl App {
     pub fn new() -> App {
         let entry = unsafe { ash::Entry::new().unwrap() };
 
-        if VALIDATION_INFO.enable_validation && !check_validation_layer_support(&entry) {
+        if VALIDATION_INFO.enable_validation && !check_validation_layer_support(&entry, &VALIDATION_INFO.required_validation_layers) {
             panic!("validation layers requested, but not avaliable!");
         }
 
-        let instance = App::create_vk_instance(&entry);
+        let debug_utils_messenger_ci = get_debug_utils_messenger_create_info();
+        let instance = App::create_vk_instance(&entry, &debug_utils_messenger_ci);
 
-        let utils_messenger = App::setup_debug_messenger(&entry, &instance);
-
+        let debug_utils_loader = ash::extensions::ext::DebugUtils::new(&entry, &instance);
+        let debug_utils_messenger = get_debug_messenger(&debug_utils_messenger_ci, &debug_utils_loader);
 
         App {
             entry: entry,
             instance: instance,
-            debug_utils_messenger: utils_messenger,
+            debug_utils_loader: debug_utils_loader,
+            debug_utils_messenger: debug_utils_messenger,
         }
     }
 
-    fn create_vk_instance(entry: &ash::Entry) -> ash::Instance{
+    fn create_vk_instance(entry: &ash::Entry, debug_utils_messenger_ci: &vk::DebugUtilsMessengerCreateInfoEXT) 
+    -> ash::Instance{
         let app_name = CString::new(WINDOW_TITLE).unwrap();
         let engine_name = CString::new("Vulkan").unwrap();
+
         let app_info = vk::ApplicationInfo {
             s_type: vk::StructureType::APPLICATION_INFO,
             p_next: ptr::null(),
@@ -130,16 +176,34 @@ impl App {
             api_version: vk::API_VERSION_1_0
         };
 
+        let require_validataion_layer_raw_names = VALIDATION_INFO
+            .required_validation_layers
+            .iter()
+            .map(|layer_name| *layer_name as *const str as *const i8 )
+            .collect::<Vec<*const i8>>();
         
         let extension_names = required_extension_names();
 
         let instance_create_info = vk::InstanceCreateInfo {
             s_type: vk::StructureType::INSTANCE_CREATE_INFO,
-            p_next: ptr::null(),
+            p_next: if VALIDATION_INFO.enable_validation {
+                debug_utils_messenger_ci as *const vk::DebugUtilsMessengerCreateInfoEXT
+                    as *const c_void
+            } else {
+                ptr::null()
+            },
             flags: vk::InstanceCreateFlags::default(),
             p_application_info: &app_info,
-            pp_enabled_layer_names: ptr::null(),
-            enabled_layer_count: 0,
+            pp_enabled_layer_names: if VALIDATION_INFO.enable_validation {
+                require_validataion_layer_raw_names.as_ptr()
+            } else {
+                ptr::null()
+            },
+            enabled_layer_count: if VALIDATION_INFO.enable_validation {
+                require_validataion_layer_raw_names.len() as u32
+            } else {
+                0u32
+            },
             pp_enabled_extension_names: extension_names.as_ptr(),
             enabled_extension_count: extension_names.len() as u32 , 
         };
@@ -150,37 +214,7 @@ impl App {
         }
     }
 
-    fn setup_debug_messenger(entry: &ash::Entry, instance: &ash::Instance) -> vk::DebugUtilsMessengerEXT {
-        let debug_utils_loader = ash::extensions::ext::DebugUtils::new(entry, instance);
-        if !VALIDATION_INFO.enable_validation {
-            vk::DebugUtilsMessengerEXT::null()
-        }
-        else {
-            let create_info = vk::DebugUtilsMessengerCreateInfoEXT {
-                s_type: vk::StructureType::DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT,
-                p_next: ptr::null(),
-                flags: vk::DebugUtilsMessengerCreateFlagsEXT::empty(),
-                message_severity: vk::DebugUtilsMessageSeverityFlagsEXT::VERBOSE | 
-                    vk::DebugUtilsMessageSeverityFlagsEXT::WARNING |
-                    vk::DebugUtilsMessageSeverityFlagsEXT::ERROR,
-                message_type: vk::DebugUtilsMessageTypeFlagsEXT::GENERAL |
-                    vk::DebugUtilsMessageTypeFlagsEXT::VALIDATION |
-                    vk::DebugUtilsMessageTypeFlagsEXT::PERFORMANCE,
-                pfn_user_callback: Some(vulkan_debug_utils_debug),
-                p_user_data: ptr::null_mut(),
-            };
 
-            let utils_messenger = unsafe { 
-                debug_utils_loader
-                    .create_debug_utils_messenger(&create_info, None)
-                    .expect("Failed to set up debug messenger!")
-            };
-
-            utils_messenger
-        }
-
-        
-    }
 
     fn init_window(event_loop: &EventLoop<()>) -> winit::window::Window {
         winit::window::WindowBuilder::new()
@@ -233,7 +267,18 @@ impl App {
         // println!("draw")
     }
 
-    pub fn clean_up() {
+}
+
+impl Drop for App {
+    fn drop(&mut self) {
+        if VALIDATION_INFO.enable_validation {
+            unsafe{
+                self.debug_utils_loader.destroy_debug_utils_messenger(self.debug_utils_messenger, None);
+            }
+        }
+        unsafe {
+            self.instance.destroy_instance(None);
+        }
 
     }
 }
