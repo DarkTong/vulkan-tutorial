@@ -6,6 +6,7 @@ use winit::window::Window;
 use ash::{vk, version::EntryV1_0, version::InstanceV1_0};
 use std::ffi::{CStr, CString, c_void};
 use std::ptr;
+use std::str::from_utf8;
 
 #[cfg(target_os = "windows")]
 use ash::extensions::khr::Win32Surface;
@@ -19,6 +20,14 @@ const WINDOW_HEIGHT: u32 = 600;
 
 pub const APPLICATION_VERSION: u32 = 1;
 pub const ENGINE_VERSION: u32 = 1;
+
+fn u8_to_string(i8_str: &[i8]) -> String {
+    let ptr = i8_str.as_ptr();
+    unsafe { CStr::from_ptr(ptr) }
+        .to_str()
+        .expect("Failed to convert vulkan raw pointer")
+        .to_owned()
+}
 
 #[cfg(all(windows))]
 pub fn required_extension_names() -> Vec<*const i8> {
@@ -68,11 +77,7 @@ pub fn check_validation_layer_support(
     for check_layer in layers.iter() {
         let mut found = false;
         for property in layer_properties.iter() {
-            let c_str = unsafe { 
-                let ptr = property.layer_name.as_ptr();
-                CStr::from_ptr(ptr)
-            }.to_str()
-            .expect("Failed to convert vulkan raw pointer");
+            let c_str = u8_to_string(&property.layer_name);
 
             if c_str == *check_layer {
                 found = true;
@@ -133,6 +138,67 @@ fn is_device_suitable(instance: &ash::Instance, p_device: vk::PhysicalDevice)
         instance.get_physical_device_queue_family_properties(p_device)
     };
 
+    // 输出gpu设备信息
+    let device_type = match p_device_properties.device_type {
+        vk::PhysicalDeviceType::CPU => "CPU",
+        vk::PhysicalDeviceType::INTEGRATED_GPU => "Integerate GPU",
+        vk::PhysicalDeviceType::DISCRETE_GPU => "Discrete GPU",
+        vk::PhysicalDeviceType::VIRTUAL_GPU => "Virtual GPU",
+        vk::PhysicalDeviceType::OTHER => "Unknown",
+        _ => panic!(),
+    };
+
+    let device_name = u8_to_string(&p_device_properties.device_name);
+    println!(
+        "\tDevice Name: {}, id: {}, type: {}",
+        device_name, p_device_properties.device_id, device_type
+    );
+
+    println!(
+        "\tAPI Version: {}",
+        p_device_properties.api_version
+    );
+
+    println!("\tSupport Queue Family: {}", p_device_queue_families.len());
+    println!("\t\tQueue Count | Graphics, Compute, Transfer, Sparse Binding");
+    for queue_family in p_device_queue_families.iter() {
+        let is_graphics_support = if queue_family.queue_flags.contains(vk::QueueFlags::GRAPHICS)
+        {
+            "support"
+        } else {
+            "unsupport"
+        };
+        let is_compute_support = if queue_family.queue_flags.contains(vk::QueueFlags::COMPUTE) {
+            "support"
+        } else {
+            "unsupport"
+        };
+        let is_transfer_support = if queue_family.queue_flags.contains(vk::QueueFlags::TRANSFER)
+        {
+            "support"
+        } else {
+            "unsupport"
+        };
+        let is_sparse_support = if queue_family
+            .queue_flags
+            .contains(vk::QueueFlags::SPARSE_BINDING)
+        {
+            "support"
+        } else {
+            "unsupport"
+        };
+
+        println!(
+            "\t\t{}\t    | {},  {},  {},  {}",
+            queue_family.queue_count,
+            is_graphics_support,
+            is_compute_support,
+            is_transfer_support,
+            is_sparse_support
+        );
+    }
+
+    // 选择设备
     for queue_family in p_device_queue_families.iter() {
         let is_graphics_support = queue_family.queue_flags.contains(vk::QueueFlags::GRAPHICS);
         let is_compute_support = queue_family.queue_flags.contains(vk::QueueFlags::COMPUTE);
@@ -164,9 +230,6 @@ fn pick_physic_device(instance: &ash::Instance) -> vk::PhysicalDevice {
         "{} devices (GPU) found with vulkan support.",
         physical_devices.len()
     );
-
-    let f_device_suitable = |p_device: &vk::PhysicalDevice|{
-    };
 
     let mut suitable_device = None;
     for &device in physical_devices.iter() {
@@ -353,3 +416,4 @@ fn main() {
 
     app.main_loop(event_loop, _window);
 }
+ 
