@@ -1,4 +1,3 @@
-use ash::vk::Handle;
 use winit::event::{ElementState, Event, KeyboardInput, VirtualKeyCode, WindowEvent};
 use winit::event_loop::{ControlFlow, EventLoop};
 use winit::window::Window;
@@ -7,7 +6,6 @@ use ash::version::{DeviceV1_0, EntryV1_0, InstanceV1_0};
 use ash::vk;
 use std::ffi::{c_void, CStr, CString};
 use std::ptr;
-use std::str::from_utf8;
 
 #[cfg(target_os = "windows")]
 use ash::extensions::khr::Win32Surface;
@@ -327,12 +325,67 @@ impl QueueFamilyIndices {
     }
 }
 
+
+#[cfg(target_os = "windows")]
+pub fn create_surface(
+    entry: &ash::Entry,
+    instance: &ash::Instance,
+    window: &winit::window::Window
+) -> Result<vk::SurfaceKHR, vk::Result> {
+
+    use std::os::raw::c_void;
+    use std::ptr;
+    use winapi::shared::windef::HWND;
+    use winapi::um::libloaderapi::GetModuleHandleW;
+    use winit::platform::windows::WindowExtWindows;
+
+    let hwnd = window.hwnd() as HWND;
+    let hinstance = unsafe {
+        GetModuleHandleW(ptr::null()) as *const c_void
+    };
+
+    let win32_create_info = vk::Win32SurfaceCreateInfoKHR {
+        s_type: vk::StructureType::WIN32_SURFACE_CREATE_INFO_KHR,
+        p_next: ptr::null(),
+        flags: Default::default(),
+        hinstance,
+        hwnd: hwnd as *const c_void,
+    };
+    let win32_surface_loader = Win32Surface::new(entry, instance);
+    unsafe {
+        win32_surface_loader.create_win32_surface(&win32_create_info, None)
+    }
+}
+
+pub fn create_surface_stuff(
+    entry: &ash::Entry,
+    instance: &ash::Instance,
+    window: &winit::window::Window,
+) -> SurfaceStuff {
+    let surface_khr = create_surface(entry, instance, window)
+        .expect("Failed to create surface.");
+    
+    let surface_loader = ash::extensions::khr::Surface::new(entry, instance);
+
+    SurfaceStuff {
+        surface_khr: surface_khr,
+        surface_loader: surface_loader
+    }
+}
+
+
+pub struct SurfaceStuff {
+    surface_loader: ash::extensions::khr::Surface,
+    surface_khr: vk::SurfaceKHR,
+}
+
 struct App {
     entry: ash::Entry,
     instance: ash::Instance,
     physical_device: vk::PhysicalDevice,
     device: ash::Device, // logic device
     graphics_queue: vk::Queue,
+    surface_stuff: SurfaceStuff,
 
     debug_utils_loader: ash::extensions::ext::DebugUtils,
     debug_utils_messenger: vk::DebugUtilsMessengerEXT,
@@ -344,7 +397,7 @@ const VALIDATION_INFO: ValidationInfo = ValidationInfo {
 };
 
 impl App {
-    pub fn new() -> App {
+    pub fn new(window: &winit::window::Window) -> App {
         let entry = unsafe { ash::Entry::new().unwrap() };
 
         if VALIDATION_INFO.enable_validation
@@ -370,14 +423,18 @@ impl App {
             logical_device.get_device_queue(queue_family_indices.graphics_family.unwrap(), 0)
         };
 
+        let surface_stuff = create_surface_stuff(&entry, &instance, window);
+
         App {
             entry: entry,
             instance: instance,
             physical_device: physical_device,
             device: logical_device,
+            graphics_queue: graphics_queue,
+            surface_stuff: surface_stuff,
+
             debug_utils_loader: debug_utils_loader,
             debug_utils_messenger: debug_utils_messenger,
-            graphics_queue: graphics_queue,
         }
     }
 
@@ -483,8 +540,8 @@ impl Drop for App {
 
 fn main() {
     let event_loop = EventLoop::new();
-    let app = App::new();
     let _window = App::init_window(&event_loop);
+    let app = App::new(&_window);
 
     app.main_loop(event_loop, _window);
 }
