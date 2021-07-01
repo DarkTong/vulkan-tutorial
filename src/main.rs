@@ -243,6 +243,30 @@ fn find_queue_family(
     indices
 }
 
+fn check_physic_device_extension_support(
+    instance: &ash::Instance,
+    p_device: vk::PhysicalDevice,
+) -> bool {
+    let avaliable_extensions = unsafe {
+        instance
+            .enumerate_device_extension_properties(p_device)
+            .expect("Failed to get physical device extension properties")
+    };
+
+    let mut required_ext_set = std::collections::HashSet::new();
+
+    for ext in DEVICE_EXTENSIONS.name {
+        required_ext_set.insert(ext.to_string());
+    }
+
+    for aval_ext in avaliable_extensions.iter() {
+        let aval_ext_name = u8_to_string(&aval_ext.extension_name);
+        required_ext_set.remove(&aval_ext_name);
+    }
+
+    required_ext_set.is_empty()
+}
+
 fn is_device_suitable(
     instance: &ash::Instance,
     p_device: vk::PhysicalDevice,
@@ -250,7 +274,15 @@ fn is_device_suitable(
 ) -> bool {
     let queue_family_indices = find_queue_family(instance, p_device, surface_stuff);
 
-    return queue_family_indices.is_complete();
+    let extensions_support = check_physic_device_extension_support(instance, p_device);
+
+    let mut swap_chain_adequate = false;
+    if extensions_support {
+        let swap_chain_sd = queue_swap_chain_support(instance, surface_stuff, p_device);
+        swap_chain_adequate = !swap_chain_sd.formats.is_empty() && !swap_chain_sd.present_modes.is_empty();
+    }
+
+    return queue_family_indices.is_complete() && extensions_support && swap_chain_adequate;
 }
 
 fn pick_physic_device(
@@ -313,6 +345,10 @@ fn create_logic_device(
         ..Default::default()
     };
 
+    let enable_extension_names = [
+        ash::extensions::khr::Swapchain::name().as_ptr(), // currently just enable the Swapchain extension.
+    ];
+
     let device_ci = vk::DeviceCreateInfo {
         s_type: vk::StructureType::DEVICE_CREATE_INFO,
         p_next: ptr::null(),
@@ -321,8 +357,8 @@ fn create_logic_device(
         p_queue_create_infos: device_queue_create_infos.as_ptr(),
         enabled_layer_count: require_layer_raw_names.len() as u32,
         pp_enabled_layer_names: require_layer_raw_names.as_ptr(),
-        enabled_extension_count: 0,
-        pp_enabled_extension_names: ptr::null(),
+        enabled_extension_count: enable_extension_names.len() as u32,
+        pp_enabled_extension_names: enable_extension_names.as_ptr(),
         p_enabled_features: &device_features,
     };
 
@@ -338,7 +374,11 @@ pub struct ValidationInfo {
     pub required_validation_layers: [&'static str; 1],
 }
 
-struct QueueFamilyIndices {
+pub struct DeviceExtension {
+    pub name: [&'static str; 1],
+}
+
+pub struct QueueFamilyIndices {
     graphics_family: Option<u32>,
     present_family: Option<u32>,
 }
@@ -346,6 +386,44 @@ struct QueueFamilyIndices {
 impl QueueFamilyIndices {
     pub fn is_complete(&self) -> bool {
         return self.graphics_family.is_some() && self.present_family.is_some();
+    }
+}
+
+pub struct SwapChainSupportDetails {
+    capabilities: vk::SurfaceCapabilitiesKHR,
+    formats: Vec<vk::SurfaceFormatKHR>,
+    present_modes: Vec<vk::PresentModeKHR>,
+}
+
+fn queue_swap_chain_support(
+    instance: &ash::Instance,
+    surface_stuff: &SurfaceStuff,
+    p_device: vk::PhysicalDevice,
+) -> SwapChainSupportDetails {
+
+    let capabilities = unsafe {
+        surface_stuff
+            .surface_loader
+            .get_physical_device_surface_capabilities(p_device, surface_stuff.surface_khr)
+            .expect("Failed to query for surface capabilities.")
+    };
+    let formats = unsafe {
+        surface_stuff
+            .surface_loader
+            .get_physical_device_surface_formats(p_device, surface_stuff.surface_khr)
+            .expect("Failed to query for surface formats.")
+    };
+    let present_modes = unsafe {
+        surface_stuff
+            .surface_loader
+            .get_physical_device_surface_present_modes(p_device, surface_stuff.surface_khr)
+            .expect("Failed to query for surface present modes.")
+    };
+
+    SwapChainSupportDetails {
+        capabilities,
+        formats,
+        present_modes,
     }
 }
 
@@ -412,6 +490,10 @@ struct App {
 const VALIDATION_INFO: ValidationInfo = ValidationInfo {
     enable_validation: true,
     required_validation_layers: ["VK_LAYER_KHRONOS_validation"],
+};
+
+const DEVICE_EXTENSIONS: DeviceExtension = DeviceExtension {
+    name: ["VK_KHR_swapchain"],
 };
 
 impl App {
