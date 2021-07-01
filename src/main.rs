@@ -199,7 +199,11 @@ fn print_physical_device_info(instance: &ash::Instance, p_device: vk::PhysicalDe
     }
 }
 
-fn find_queue_family(instance: &ash::Instance, p_device: vk::PhysicalDevice, surface_stuff: &SurfaceStuff) -> QueueFamilyIndices {
+fn find_queue_family(
+    instance: &ash::Instance,
+    p_device: vk::PhysicalDevice,
+    surface_stuff: &SurfaceStuff,
+) -> QueueFamilyIndices {
     let p_device_queue_families =
         unsafe { instance.get_physical_device_queue_family_properties(p_device) };
     let mut indices: QueueFamilyIndices = QueueFamilyIndices {
@@ -211,14 +215,10 @@ fn find_queue_family(instance: &ash::Instance, p_device: vk::PhysicalDevice, sur
     // 选择设备
     for queue_family in p_device_queue_families.iter() {
         let is_graphics_support = queue_family.queue_flags.contains(vk::QueueFlags::GRAPHICS);
-        let is_present_support = unsafe { 
+        let is_present_support = unsafe {
             surface_stuff
                 .surface_loader
-                .get_physical_device_surface_support(
-                    p_device, 
-                    index, 
-                    surface_stuff.surface_khr
-                )
+                .get_physical_device_surface_support(p_device, index, surface_stuff.surface_khr)
                 .expect("Failed to get physic device surface support")
         };
         // let is_compute_support = queue_family.queue_flags.contains(vk::QueueFlags::COMPUTE);
@@ -243,13 +243,20 @@ fn find_queue_family(instance: &ash::Instance, p_device: vk::PhysicalDevice, sur
     indices
 }
 
-fn is_device_suitable(instance: &ash::Instance, p_device: vk::PhysicalDevice, surface_stuff: &SurfaceStuff) -> bool {
+fn is_device_suitable(
+    instance: &ash::Instance,
+    p_device: vk::PhysicalDevice,
+    surface_stuff: &SurfaceStuff,
+) -> bool {
     let queue_family_indices = find_queue_family(instance, p_device, surface_stuff);
 
     return queue_family_indices.is_complete();
 }
 
-fn pick_physic_device(instance: &ash::Instance, surface_stuff: &SurfaceStuff) -> vk::PhysicalDevice {
+fn pick_physic_device(
+    instance: &ash::Instance,
+    surface_stuff: &SurfaceStuff,
+) -> vk::PhysicalDevice {
     let physical_devices = unsafe {
         instance
             .enumerate_physical_devices()
@@ -299,7 +306,7 @@ fn create_logic_device(
         };
         device_queue_create_infos.push(device_queue_ci);
     }
-    
+
     let require_layer_raw_names = get_require_layer_raw_names();
 
     let device_features = vk::PhysicalDeviceFeatures {
@@ -342,14 +349,12 @@ impl QueueFamilyIndices {
     }
 }
 
-
 #[cfg(target_os = "windows")]
 pub fn create_surface(
     entry: &ash::Entry,
     instance: &ash::Instance,
-    window: &winit::window::Window
+    window: &winit::window::Window,
 ) -> Result<vk::SurfaceKHR, vk::Result> {
-
     use std::os::raw::c_void;
     use std::ptr;
     use winapi::shared::windef::HWND;
@@ -357,9 +362,7 @@ pub fn create_surface(
     use winit::platform::windows::WindowExtWindows;
 
     let hwnd = window.hwnd() as HWND;
-    let hinstance = unsafe {
-        GetModuleHandleW(ptr::null()) as *const c_void
-    };
+    let hinstance = unsafe { GetModuleHandleW(ptr::null()) as *const c_void };
 
     let win32_create_info = vk::Win32SurfaceCreateInfoKHR {
         s_type: vk::StructureType::WIN32_SURFACE_CREATE_INFO_KHR,
@@ -369,9 +372,7 @@ pub fn create_surface(
         hwnd: hwnd as *const c_void,
     };
     let win32_surface_loader = Win32Surface::new(entry, instance);
-    unsafe {
-        win32_surface_loader.create_win32_surface(&win32_create_info, None)
-    }
+    unsafe { win32_surface_loader.create_win32_surface(&win32_create_info, None) }
 }
 
 pub fn create_surface_stuff(
@@ -379,17 +380,15 @@ pub fn create_surface_stuff(
     instance: &ash::Instance,
     window: &winit::window::Window,
 ) -> SurfaceStuff {
-    let surface_khr = create_surface(entry, instance, window)
-        .expect("Failed to create surface.");
-    
+    let surface_khr = create_surface(entry, instance, window).expect("Failed to create surface.");
+
     let surface_loader = ash::extensions::khr::Surface::new(entry, instance);
 
     SurfaceStuff {
         surface_khr: surface_khr,
-        surface_loader: surface_loader
+        surface_loader: surface_loader,
     }
 }
-
 
 pub struct SurfaceStuff {
     surface_loader: ash::extensions::khr::Surface,
@@ -447,7 +446,6 @@ impl App {
         let present_queue = unsafe {
             logical_device.get_device_queue(queue_family_indices.present_family.unwrap(), 0)
         };
-
 
         App {
             entry: entry,
