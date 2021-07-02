@@ -636,6 +636,12 @@ fn create_image_views(device: &ash::Device, swapchain_stuff: &SwapChainStuff) ->
     image_views
 }
 
+fn create_graphics_pipeline(
+    device: &vk::Device,
+) {
+
+}
+
 pub struct SurfaceStuff {
     surface_loader: ash::extensions::khr::Surface,
     surface_khr: vk::SurfaceKHR,
