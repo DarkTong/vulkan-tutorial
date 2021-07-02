@@ -825,6 +825,9 @@ impl App {
 impl Drop for App {
     fn drop(&mut self) {
         unsafe {
+            for &image_view in self.swapchain_image_views.iter() {
+                self.device.destroy_image_view(image_view, None);
+            }
             self.swapchain_loader
                 .destroy_swapchain(self.swapchain_khr, None);
             self.device.destroy_device(None);
