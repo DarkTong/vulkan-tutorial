@@ -599,7 +599,10 @@ pub fn create_surface_stuff(
     }
 }
 
-fn create_image_views(device: &ash::Device, swapchain_stuff: &SwapChainStuff) -> Vec<vk::ImageView> {
+fn create_image_views(
+    device: &ash::Device,
+    swapchain_stuff: &SwapChainStuff,
+) -> Vec<vk::ImageView> {
     let mut image_views = Vec::with_capacity(swapchain_stuff.swapchain_image.len());
     for image in swapchain_stuff.swapchain_image.iter() {
         let image_view_ci = vk::ImageViewCreateInfo {
@@ -636,10 +639,60 @@ fn create_image_views(device: &ash::Device, swapchain_stuff: &SwapChainStuff) ->
     image_views
 }
 
-fn create_graphics_pipeline(
-    device: &vk::Device,
-) {
+fn create_graphics_pipeline(device: &ash::Device) {
+    let vert_code = read_shader_code(std::path::Path::new("shader/spv/09_triangle.vert.spv"));
+    let frag_code = read_shader_code(std::path::Path::new("shader/spv/09_triangle.frag.spv"));
 
+    let vert_shader_module = create_shader_module(device, &vert_code);
+    let frag_shader_module = create_shader_module(device, &frag_code);
+
+    let vert_pp_shader_stage_ci = vk::PipelineShaderStageCreateInfo {
+        s_type: vk::StructureType::PIPELINE_SHADER_STAGE_CREATE_INFO,
+        p_next: ptr::null(),
+        flags: vk::PipelineShaderStageCreateFlags::empty(),
+        stage: vk::ShaderStageFlags::VERTEX,
+        module: vert_shader_module,
+        p_name: "main".as_ptr() as *const i8,
+        p_specialization_info: ptr::null(),
+    };
+
+    let frag_pp_shader_stage_ci = vk::PipelineShaderStageCreateInfo {
+        s_type: vk::StructureType::PIPELINE_SHADER_STAGE_CREATE_INFO,
+        p_next: ptr::null(),
+        flags: vk::PipelineShaderStageCreateFlags::empty(),
+        stage: vk::ShaderStageFlags::VERTEX,
+        module: frag_shader_module,
+        p_name: "main".as_ptr() as *const i8,
+        p_specialization_info: ptr::null(),
+    };
+
+    let shader_stage_cis = [vert_pp_shader_stage_ci, frag_pp_shader_stage_ci];
+}
+
+fn read_shader_code(shader_path: &std::path::Path) -> Vec<u8> {
+    use std::fs::File;
+    use std::io::Read;
+
+    let spv_file =
+        File::open(shader_path).expect(&format!("Failed to open file at {:?}", shader_path));
+    let bytes_code: Vec<u8> = spv_file.bytes().filter_map(|byte| byte.ok()).collect();
+    bytes_code
+}
+
+fn create_shader_module(device: &ash::Device, shader_code: &Vec<u8>) -> vk::ShaderModule {
+    let shader_module_ci = vk::ShaderModuleCreateInfo {
+        s_type: vk::StructureType::SHADER_MODULE_CREATE_INFO,
+        p_next: ptr::null(),
+        flags: vk::ShaderModuleCreateFlags::empty(),
+        code_size: shader_code.len(),
+        p_code: shader_code.as_ptr() as *const u32,
+    };
+
+    unsafe {
+        device
+            .create_shader_module(&shader_module_ci, None)
+            .expect("Failed to create shader modules.")
+    }
 }
 
 pub struct SurfaceStuff {
