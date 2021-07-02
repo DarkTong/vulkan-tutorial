@@ -279,7 +279,8 @@ fn is_device_suitable(
     let mut swap_chain_adequate = false;
     if extensions_support {
         let swap_chain_sd = query_swap_chain_support(instance, surface_stuff, p_device);
-        swap_chain_adequate = !swap_chain_sd.formats.is_empty() && !swap_chain_sd.present_modes.is_empty();
+        swap_chain_adequate =
+            !swap_chain_sd.formats.is_empty() && !swap_chain_sd.present_modes.is_empty();
     }
 
     return queue_family_indices.is_complete() && extensions_support && swap_chain_adequate;
@@ -408,7 +409,6 @@ fn query_swap_chain_support(
     surface_stuff: &SurfaceStuff,
     p_device: vk::PhysicalDevice,
 ) -> SwapChainSupportDetails {
-
     let capabilities = unsafe {
         surface_stuff
             .surface_loader
@@ -435,18 +435,23 @@ fn query_swap_chain_support(
     }
 }
 
-fn choose_swap_surface_format(avaliable_formats: &Vec<vk::SurfaceFormatKHR>) -> vk::SurfaceFormatKHR {
+fn choose_swap_surface_format(
+    avaliable_formats: &Vec<vk::SurfaceFormatKHR>,
+) -> vk::SurfaceFormatKHR {
     for format in avaliable_formats {
-        if format.format == vk::Format::B8G8R8A8_SRGB &&
-            format.color_space == vk::ColorSpaceKHR::SRGB_NONLINEAR {
-                return format.clone();
-            }
+        if format.format == vk::Format::B8G8R8A8_SRGB
+            && format.color_space == vk::ColorSpaceKHR::SRGB_NONLINEAR
+        {
+            return format.clone();
+        }
     }
 
     avaliable_formats.first().unwrap().clone()
 }
 
-fn choose_swap_present_mode(avaliable_present_modes: &Vec<vk::PresentModeKHR>) -> vk::PresentModeKHR {
+fn choose_swap_present_mode(
+    avaliable_present_modes: &Vec<vk::PresentModeKHR>,
+) -> vk::PresentModeKHR {
     for present_mode in avaliable_present_modes {
         if *present_mode == vk::PresentModeKHR::MAILBOX {
             return *present_mode;
@@ -458,21 +463,20 @@ fn choose_swap_present_mode(avaliable_present_modes: &Vec<vk::PresentModeKHR>) -
 fn choose_swap_extent(avaliable_capabilities: &vk::SurfaceCapabilitiesKHR) -> vk::Extent2D {
     if avaliable_capabilities.current_extent.width != std::u32::MAX {
         avaliable_capabilities.current_extent
-    }
-    else {
+    } else {
         use num::clamp;
 
         vk::Extent2D {
             width: clamp(
                 WINDOW_WIDTH,
                 avaliable_capabilities.min_image_extent.width,
-                avaliable_capabilities.max_image_extent.width
+                avaliable_capabilities.max_image_extent.width,
             ),
             height: clamp(
                 WINDOW_HEIGHT,
                 avaliable_capabilities.min_image_extent.height,
-                avaliable_capabilities.max_image_extent.height
-            )
+                avaliable_capabilities.max_image_extent.height,
+            ),
         }
     }
 }
@@ -482,7 +486,7 @@ fn create_swap_chain(
     p_device: vk::PhysicalDevice,
     device: &ash::Device,
     surface_stuff: &SurfaceStuff,
-    queue_family: &QueueFamilyIndices
+    queue_family: &QueueFamilyIndices,
 ) -> SwapChainStuff {
     let detail = query_swap_chain_support(&instance, &surface_stuff, p_device);
     let surface_format = choose_swap_surface_format(&detail.formats);
@@ -490,7 +494,8 @@ fn create_swap_chain(
     let swapchain_extent = choose_swap_extent(&detail.capabilities);
 
     let mut image_count = detail.capabilities.min_image_count + 1;
-    if detail.capabilities.max_image_count > 0 && image_count > detail.capabilities.max_image_count {
+    if detail.capabilities.max_image_count > 0 && image_count > detail.capabilities.max_image_count
+    {
         image_count = detail.capabilities.max_image_count;
     }
 
@@ -505,8 +510,7 @@ fn create_swap_chain(
         image_sharing_mode = vk::SharingMode::CONCURRENT;
         index_count = 2u32;
         indices_ptr = qf_indices.as_ptr();
-    }
-    else {
+    } else {
         image_sharing_mode = vk::SharingMode::EXCLUSIVE;
         index_count = 0u32;
         indices_ptr = ptr::null();
@@ -595,6 +599,43 @@ pub fn create_surface_stuff(
     }
 }
 
+fn create_image_views(device: &ash::Device, swapchain_stuff: &SwapChainStuff) -> Vec<ImageView> {
+    let image_views = Vec::with_capacity(swapchain_stuff.swapchain_image.len());
+    for image in swapchain_stuff.swapchain_image.iter() {
+        let image_view_ci = vk::ImageViewCreateInfo {
+            s_type: vk::StructureType::IMAGE_VIEW_CREATE_INFO,
+            p_next: ptr::null(),
+            flags: vk::ImageViewCreateFlags::empty(),
+            image: *image,
+            view_type: vk::ImageViewType::TYPE_2D,
+            format: swapchain_stuff.swapchain_format,
+            components: vk::ComponentMapping {
+                r: vk::ComponentSwizzle::IDENTITY,
+                g: vk::ComponentSwizzle::IDENTITY,
+                b: vk::ComponentSwizzle::IDENTITY,
+                a: vk::ComponentSwizzle::IDENTITY,
+            },
+            subresource_range: vk::ImageSubresourceRange {
+                aspect_mask: vk::ImageAspectFlags::COLOR,
+                base_mip_level: 0,
+                level_count: 1,
+                base_array_layer: 0,
+                layer_count: 1,
+            },
+        };
+
+        let image_view = unsafe {
+            device
+                .create_image_view(&image_view_ci, None)
+                .expect("Failed to create image view.")
+        };
+
+        image_views.push(image_view);
+    }
+
+    image_views
+}
+
 pub struct SurfaceStuff {
     surface_loader: ash::extensions::khr::Surface,
     surface_khr: vk::SurfaceKHR,
@@ -615,6 +656,7 @@ struct App {
     swapchain_image: Vec<vk::Image>,
     swapchain_format: vk::Format,
     swapchain_extent: vk::Extent2D,
+    swapchain_image_views: Vec<vk::ImageView>,
 
     debug_utils_loader: ash::extensions::ext::DebugUtils,
     debug_utils_messenger: vk::DebugUtilsMessengerEXT,
@@ -663,8 +705,14 @@ impl App {
         };
 
         let swapchain_stuff = create_swap_chain(
-            &instance, 
-            physical_device, &logical_device, &surface_stuff, &queue_family_indices);
+            &instance,
+            physical_device,
+            &logical_device,
+            &surface_stuff,
+            &queue_family_indices,
+        );
+
+        let swapchain_image_views = create_image_views(&logical_device, &swapchain_stuff);
 
         App {
             entry: entry,
@@ -681,6 +729,7 @@ impl App {
             swapchain_image: swapchain_stuff.swapchain_image,
             swapchain_format: swapchain_stuff.swapchain_format,
             swapchain_extent: swapchain_stuff.swapchain_extent,
+            swapchain_image_views: swapchain_image_views,
 
             debug_utils_loader: debug_utils_loader,
             debug_utils_messenger: debug_utils_messenger,
@@ -776,7 +825,8 @@ impl App {
 impl Drop for App {
     fn drop(&mut self) {
         unsafe {
-            self.swapchain_loader.destroy_swapchain(self.swapchain_khr, None);
+            self.swapchain_loader
+                .destroy_swapchain(self.swapchain_khr, None);
             self.device.destroy_device(None);
             self.surface_loader.destroy_surface(self.surface_khr, None);
             if VALIDATION_INFO.enable_validation {
