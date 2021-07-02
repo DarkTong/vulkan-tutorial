@@ -599,8 +599,8 @@ pub fn create_surface_stuff(
     }
 }
 
-fn create_image_views(device: &ash::Device, swapchain_stuff: &SwapChainStuff) -> Vec<ImageView> {
-    let image_views = Vec::with_capacity(swapchain_stuff.swapchain_image.len());
+fn create_image_views(device: &ash::Device, swapchain_stuff: &SwapChainStuff) -> Vec<vk::ImageView> {
+    let mut image_views = Vec::with_capacity(swapchain_stuff.swapchain_image.len());
     for image in swapchain_stuff.swapchain_image.iter() {
         let image_view_ci = vk::ImageViewCreateInfo {
             s_type: vk::StructureType::IMAGE_VIEW_CREATE_INFO,
