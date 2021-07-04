@@ -641,8 +641,8 @@ fn create_image_views(
 
 fn create_graphics_pipeline(
     device: &ash::Device,
-    swapchain_stuff: &SwapChainStuff
-) {
+    swapchain_stuff: &SwapChainStuff,
+) -> vk::PipelineLayout {
     let vert_code = read_shader_code(std::path::Path::new("shader/spv/09_triangle.vert.spv"));
     let frag_code = read_shader_code(std::path::Path::new("shader/spv/09_triangle.frag.spv"));
 
@@ -692,24 +692,20 @@ fn create_graphics_pipeline(
     };
 
     // viewport
-    let viewports = [
-        vk::Viewport {
-            x: 0f32,
-            y: 0f32,
-            width: swapchain_stuff.swapchain_extent.width as f32,
-            height: swapchain_stuff.swapchain_extent.height as f32,
-            min_depth: 0f32,
-            max_depth: 1f32,
-        },
-    ];
+    let viewports = [vk::Viewport {
+        x: 0f32,
+        y: 0f32,
+        width: swapchain_stuff.swapchain_extent.width as f32,
+        height: swapchain_stuff.swapchain_extent.height as f32,
+        min_depth: 0f32,
+        max_depth: 1f32,
+    }];
 
     // scissor
-    let scissor = [
-        vk::Rect2D {
-            offset: vk::Offset2D { x: 0, y: 0},
-            extent: swapchain_stuff.swapchain_extent.clone(),
-        },
-    ];
+    let scissor = [vk::Rect2D {
+        offset: vk::Offset2D { x: 0, y: 0 },
+        extent: swapchain_stuff.swapchain_extent.clone(),
+    }];
 
     // rasterizer
     let rasterizer_state_ci = vk::PipelineRasterizationStateCreateInfo {
@@ -788,10 +784,7 @@ fn create_graphics_pipeline(
         blend_constants: [0f32; 4],
     };
 
-    let dynamic_state = [
-        vk::DynamicState::VIEWPORT,
-        vk::DynamicState::LINE_WIDTH,
-    ];
+    let dynamic_state = [vk::DynamicState::VIEWPORT, vk::DynamicState::LINE_WIDTH];
 
     let dynamic_state_ci = vk::PipelineDynamicStateCreateInfo {
         s_type: vk::StructureType::PIPELINE_DYNAMIC_STATE_CREATE_INFO,
@@ -806,22 +799,24 @@ fn create_graphics_pipeline(
         s_type: vk::StructureType::PIPELINE_LAYOUT_CREATE_INFO,
         p_next: ptr::null(),
         flags: vk::PipelineLayoutCreateFlags::empty(),
-        set_layout_count: 1,
+        set_layout_count: 0,
         p_set_layouts: ptr::null(),
         push_constant_range_count: 0,
         p_push_constant_ranges: ptr::null(),
     };
 
-    let pp_layout = unsafe { 
-        device.create_pipeline_layout(&pp_layout_ci, None)
+    let pp_layout = unsafe {
+        device
+            .create_pipeline_layout(&pp_layout_ci, None)
             .expect("Failed create pipeline layout.")
     };
 
-
-    unsafe { 
+    unsafe {
         device.destroy_shader_module(vert_shader_module, None);
         device.destroy_shader_module(frag_shader_module, None);
-    }
+    };
+
+    pp_layout
 }
 
 fn read_shader_code(shader_path: &std::path::Path) -> Vec<u8> {
@@ -871,6 +866,8 @@ struct App {
     swapchain_format: vk::Format,
     swapchain_extent: vk::Extent2D,
     swapchain_image_views: Vec<vk::ImageView>,
+    //
+    pipeline_layout: vk::PipelineLayout,
 
     debug_utils_loader: ash::extensions::ext::DebugUtils,
     debug_utils_messenger: vk::DebugUtilsMessengerEXT,
@@ -928,6 +925,8 @@ impl App {
 
         let swapchain_image_views = create_image_views(&logical_device, &swapchain_stuff);
 
+        let pipeline_layout = create_graphics_pipeline(&logical_device, &swapchain_stuff);
+
         App {
             entry: entry,
             instance: instance,
@@ -944,6 +943,8 @@ impl App {
             swapchain_format: swapchain_stuff.swapchain_format,
             swapchain_extent: swapchain_stuff.swapchain_extent,
             swapchain_image_views: swapchain_image_views,
+            //
+            pipeline_layout: pipeline_layout,
 
             debug_utils_loader: debug_utils_loader,
             debug_utils_messenger: debug_utils_messenger,
@@ -1042,6 +1043,8 @@ impl Drop for App {
             for &image_view in self.swapchain_image_views.iter() {
                 self.device.destroy_image_view(image_view, None);
             }
+            self.device
+                .destroy_pipeline_layout(self.pipeline_layout, None);
             self.swapchain_loader
                 .destroy_swapchain(self.swapchain_khr, None);
             self.device.destroy_device(None);
