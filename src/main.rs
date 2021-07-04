@@ -60,10 +60,12 @@ unsafe extern "system" fn vulkan_debug_utils_debug(
 
     let message = unsafe { CStr::from_ptr((*p_callback_data).p_message) };
 
-    println!(
-        "[Debug]{}{}{:?}",
-        message_severity_str, message_type_str, message
-    );
+    if message_severity == vk::DebugUtilsMessageSeverityFlagsEXT::ERROR {
+        println!(
+            "[Debug]{}{}{:?}",
+            message_severity_str, message_type_str, message
+        );
+    }
 
     vk::FALSE
 }
@@ -677,7 +679,8 @@ fn create_image_views(
 fn create_graphics_pipeline(
     device: &ash::Device,
     swapchain_stuff: &SwapChainStuff,
-) -> vk::PipelineLayout {
+    render_pass: vk::RenderPass,
+) -> (vk::Pipeline, vk::PipelineLayout) {
     let vert_code = read_shader_code(std::path::Path::new("shader/spv/09_triangle.vert.spv"));
     let frag_code = read_shader_code(std::path::Path::new("shader/spv/09_triangle.frag.spv"));
 
@@ -737,13 +740,23 @@ fn create_graphics_pipeline(
     }];
 
     // scissor
-    let scissor = [vk::Rect2D {
+    let scissors = [vk::Rect2D {
         offset: vk::Offset2D { x: 0, y: 0 },
         extent: swapchain_stuff.swapchain_extent.clone(),
     }];
 
+    let viewport_ci = vk::PipelineViewportStateCreateInfo {
+        s_type: vk::StructureType::PIPELINE_VIEWPORT_STATE_CREATE_INFO,
+        p_next: ptr::null(),
+        flags: vk::PipelineViewportStateCreateFlags::empty(),
+        viewport_count: viewports.len() as u32,
+        p_viewports: viewports.as_ptr(),
+        scissor_count: scissors.len() as u32,
+        p_scissors: scissors.as_ptr(),
+    };
+
     // rasterizer
-    let rasterizer_state_ci = vk::PipelineRasterizationStateCreateInfo {
+    let rasterization_ci = vk::PipelineRasterizationStateCreateInfo {
         s_type: vk::StructureType::PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
         p_next: ptr::null(),
         flags: vk::PipelineRasterizationStateCreateFlags::empty(),
@@ -759,8 +772,8 @@ fn create_graphics_pipeline(
         line_width: 1f32,
     };
 
-    // multisampling
-    let multisampling_state_ci = vk::PipelineMultisampleStateCreateInfo {
+    // multisample
+    let multisample_ci = vk::PipelineMultisampleStateCreateInfo {
         s_type: vk::StructureType::PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
         p_next: ptr::null(),
         flags: vk::PipelineMultisampleStateCreateFlags::empty(),
@@ -782,7 +795,7 @@ fn create_graphics_pipeline(
         reference: 0,
     };
 
-    let depth_stencil_state_ci = vk::PipelineDepthStencilStateCreateInfo {
+    let depth_stencil_ci = vk::PipelineDepthStencilStateCreateInfo {
         s_type: vk::StructureType::PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,
         p_next: ptr::null(),
         flags: vk::PipelineDepthStencilStateCreateFlags::empty(),
@@ -808,7 +821,7 @@ fn create_graphics_pipeline(
         alpha_blend_op: vk::BlendOp::ADD,
     }];
 
-    let color_blend_state_ci = vk::PipelineColorBlendStateCreateInfo {
+    let color_blend_ci = vk::PipelineColorBlendStateCreateInfo {
         s_type: vk::StructureType::PIPELINE_COLOR_BLEND_STATE_CREATE_INFO,
         p_next: ptr::null(),
         flags: vk::PipelineColorBlendStateCreateFlags::empty(),
@@ -821,7 +834,7 @@ fn create_graphics_pipeline(
 
     let dynamic_state = [vk::DynamicState::VIEWPORT, vk::DynamicState::LINE_WIDTH];
 
-    let dynamic_state_ci = vk::PipelineDynamicStateCreateInfo {
+    let dynamic_ci = vk::PipelineDynamicStateCreateInfo {
         s_type: vk::StructureType::PIPELINE_DYNAMIC_STATE_CREATE_INFO,
         p_next: ptr::null(),
         flags: vk::PipelineDynamicStateCreateFlags::empty(),
@@ -851,7 +864,27 @@ fn create_graphics_pipeline(
         device.destroy_shader_module(frag_shader_module, None);
     };
 
-    pp_layout
+    let pipeline_ci = vk::GraphicsPipelineCreateInfo::builder()
+        .stages(&shader_stage_cis)
+        .vertex_input_state(&vertex_input_ci)
+        .input_assembly_state(&input_assembly)
+        .viewport_state(&viewport_ci)
+        .rasterization_state(&rasterization_ci)
+        .multisample_state(&multisample_ci)
+        .depth_stencil_state(&depth_stencil_ci)
+        .color_blend_state(&color_blend_ci)
+        .dynamic_state(&dynamic_ci)
+        .layout(pp_layout)
+        .render_pass(render_pass)
+        .build();
+
+    let graphics_pipelines = unsafe {
+        device
+            .create_graphics_pipelines(vk::PipelineCache::null(), &[pipeline_ci], None)
+            .expect("Failed to create graphics pipeline")
+    };
+
+    (graphics_pipelines[0], pp_layout)
 }
 
 fn read_shader_code(shader_path: &std::path::Path) -> Vec<u8> {
@@ -963,7 +996,8 @@ impl App {
 
         let render_pass = create_render_pass(&logical_device, &swapchain_stuff);
 
-        let pipeline_layout = create_graphics_pipeline(&logical_device, &swapchain_stuff);
+        let (pipeline, pipeline_layout) =
+            create_graphics_pipeline(&logical_device, &swapchain_stuff, render_pass);
 
         App {
             entry: entry,
