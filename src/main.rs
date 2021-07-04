@@ -599,6 +599,41 @@ pub fn create_surface_stuff(
     }
 }
 
+fn create_render_pass(device: &ash::Device, swapchain_stuff: &SwapChainStuff) -> vk::RenderPass {
+    let attachments = [vk::AttachmentDescription {
+        flags: vk::AttachmentDescriptionFlags::empty(),
+        format: swapchain_stuff.swapchain_format.clone(),
+        samples: vk::SampleCountFlags::TYPE_1,
+        load_op: vk::AttachmentLoadOp::CLEAR,
+        store_op: vk::AttachmentStoreOp::STORE,
+        stencil_load_op: vk::AttachmentLoadOp::DONT_CARE,
+        stencil_store_op: vk::AttachmentStoreOp::DONT_CARE,
+        initial_layout: vk::ImageLayout::UNDEFINED,
+        final_layout: vk::ImageLayout::PRESENT_SRC_KHR,
+    }];
+
+    let color_attachments_ref = [vk::AttachmentReference {
+        attachment: 0,
+        layout: vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
+    }];
+
+    let subpasses = [vk::SubpassDescription::builder()
+        .pipeline_bind_point(vk::PipelineBindPoint::GRAPHICS)
+        .color_attachments(&color_attachments_ref)
+        .build()];
+
+    let render_pass_ci = vk::RenderPassCreateInfo::builder()
+        .attachments(&attachments)
+        .subpasses(&subpasses)
+        .build();
+
+    unsafe {
+        device
+            .create_render_pass(&render_pass_ci, None)
+            .expect("Failed to create render pass.")
+    }
+}
+
 fn create_image_views(
     device: &ash::Device,
     swapchain_stuff: &SwapChainStuff,
@@ -868,6 +903,7 @@ struct App {
     swapchain_image_views: Vec<vk::ImageView>,
     //
     pipeline_layout: vk::PipelineLayout,
+    render_pass: vk::RenderPass,
 
     debug_utils_loader: ash::extensions::ext::DebugUtils,
     debug_utils_messenger: vk::DebugUtilsMessengerEXT,
@@ -925,6 +961,8 @@ impl App {
 
         let swapchain_image_views = create_image_views(&logical_device, &swapchain_stuff);
 
+        let render_pass = create_render_pass(&logical_device, &swapchain_stuff);
+
         let pipeline_layout = create_graphics_pipeline(&logical_device, &swapchain_stuff);
 
         App {
@@ -944,6 +982,7 @@ impl App {
             swapchain_extent: swapchain_stuff.swapchain_extent,
             swapchain_image_views: swapchain_image_views,
             //
+            render_pass: render_pass,
             pipeline_layout: pipeline_layout,
 
             debug_utils_loader: debug_utils_loader,
@@ -1043,6 +1082,7 @@ impl Drop for App {
             for &image_view in self.swapchain_image_views.iter() {
                 self.device.destroy_image_view(image_view, None);
             }
+            self.device.destroy_render_pass(self.render_pass, None);
             self.device
                 .destroy_pipeline_layout(self.pipeline_layout, None);
             self.swapchain_loader
