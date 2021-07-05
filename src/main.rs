@@ -949,6 +949,24 @@ fn create_framebuffer(
     framebuffers
 }
 
+fn create_command_pool(
+    device: &ash::Device,
+    queue_family_indices: &QueueFamilyIndices,
+) -> vk::CommandPool {
+    let command_pool_ci = vk::CommandPoolCreateInfo {
+        s_type: vk::StructureType::COMMAND_POOL_CREATE_INFO,
+        p_next: ptr::null(),
+        flags: vk::CommandPoolCreateFlags::empty(),
+        queue_family_index: queue_family_indices.graphics_family.unwrap(),
+    };
+
+    unsafe {
+        device
+            .create_command_pool(&command_pool_ci, None)
+            .expect("Failed to create command pool.")
+    }
+}
+
 pub struct SurfaceStuff {
     surface_loader: ash::extensions::khr::Surface,
     surface_khr: vk::SurfaceKHR,
@@ -975,6 +993,8 @@ struct App {
     graphic_pipeline: vk::Pipeline,
     render_pass: vk::RenderPass,
     swapchain_framebuffers: Vec<vk::Framebuffer>,
+    //
+    command_pool: vk::CommandPool,
 
     debug_utils_loader: ash::extensions::ext::DebugUtils,
     debug_utils_messenger: vk::DebugUtilsMessengerEXT,
@@ -1036,9 +1056,15 @@ impl App {
 
         let (pipeline, pipeline_layout) =
             create_graphics_pipeline(&logical_device, &swapchain_stuff, render_pass);
-        
-        
-        let framebuffers = create_framebuffer(&logical_device, &swapchain_stuff, &swapchain_image_views, render_pass);
+
+        let framebuffers = create_framebuffer(
+            &logical_device,
+            &swapchain_stuff,
+            &swapchain_image_views,
+            render_pass,
+        );
+
+        let command_pool = create_command_pool(&logical_device, &queue_family_indices);
 
         App {
             entry: entry,
@@ -1061,6 +1087,8 @@ impl App {
             graphic_pipeline: pipeline,
             render_pass: render_pass,
             swapchain_framebuffers: framebuffers,
+            //
+            command_pool: command_pool,
 
             debug_utils_loader: debug_utils_loader,
             debug_utils_messenger: debug_utils_messenger,
@@ -1159,6 +1187,8 @@ impl Drop for App {
             for &image_view in self.swapchain_image_views.iter() {
                 self.device.destroy_image_view(image_view, None);
             }
+
+            self.device.destroy_command_pool(self.command_pool, None);
             for framebuffer in self.swapchain_framebuffers.iter() {
                 self.device.destroy_framebuffer(*framebuffer, None);
             }
