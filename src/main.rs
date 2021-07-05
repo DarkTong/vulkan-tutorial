@@ -967,6 +967,90 @@ fn create_command_pool(
     }
 }
 
+fn create_command_buffers(
+    device: &ash::Device,
+    swapchain_stuff: &SwapChainStuff,
+    command_pool: vk::CommandPool,
+    render_pass: vk::RenderPass,
+    framebuffers: &Vec<vk::Framebuffer>,
+    pipeline: vk::Pipeline,
+) -> Vec<vk::CommandBuffer> {
+    let command_buffer_ai = vk::CommandBufferAllocateInfo {
+        s_type: vk::StructureType::COMMAND_BUFFER_ALLOCATE_INFO,
+        p_next: ptr::null(),
+        command_pool: command_pool,
+        level: vk::CommandBufferLevel::PRIMARY,
+        command_buffer_count: swapchain_stuff.swapchain_image.len() as u32,
+    };
+
+    let command_buffers = unsafe {
+        device
+            .allocate_command_buffers(&command_buffer_ai)
+            .expect("Failed to allocate command buffers.")
+    };
+
+    for (idx, &cmd) in command_buffers.iter().enumerate() {
+        let cmd_begin_info = vk::CommandBufferBeginInfo {
+            s_type: vk::StructureType::COMMAND_BUFFER_BEGIN_INFO,
+            p_next: ptr::null(),
+            flags: vk::CommandBufferUsageFlags::empty(),
+            p_inheritance_info: ptr::null(),
+        };
+
+        unsafe {
+            device
+                .begin_command_buffer(cmd, &cmd_begin_info)
+                .expect("Failed to begin command buffer.");
+        }
+
+        let clear_value = [vk::ClearValue {
+            color: vk::ClearColorValue { float32: [0f32; 4] },
+        }];
+
+        let render_pass_info = vk::RenderPassBeginInfo {
+            s_type: vk::StructureType::RENDER_PASS_BEGIN_INFO,
+            p_next: ptr::null(),
+            render_pass: render_pass,
+            framebuffer: framebuffers[idx],
+            render_area: vk::Rect2D {
+                offset: vk::Offset2D { x: 0, y: 0 },
+                extent: swapchain_stuff.swapchain_extent,
+            },
+            clear_value_count: clear_value.len() as u32,
+            p_clear_values: clear_value.as_ptr(),
+        };
+
+        let viewports = [
+            vk::Viewport { 
+                x: 0f32, y: 0f32,
+                width: swapchain_stuff.swapchain_extent.width as f32,
+                height: swapchain_stuff.swapchain_extent.height as f32,
+                min_depth: 0f32,
+                max_depth: 1f32,
+            },
+        ];
+
+        unsafe {
+            // render pass
+            device.cmd_begin_render_pass(cmd, &render_pass_info, vk::SubpassContents::INLINE);
+            // pipeline
+            device.cmd_bind_pipeline(cmd, vk::PipelineBindPoint::GRAPHICS, pipeline);
+            // viewport
+            device.cmd_set_viewport(cmd, 0, &viewports);
+            // draw
+            device.cmd_draw(cmd, 3, 1, 0, 0);
+            // end render pass
+            device.cmd_end_render_pass(cmd);
+            // end command buffer
+            device
+                .end_command_buffer(cmd)
+                .expect("Failed to end command buffer.");
+        }
+    }
+
+    command_buffers
+}
+
 pub struct SurfaceStuff {
     surface_loader: ash::extensions::khr::Surface,
     surface_khr: vk::SurfaceKHR,
@@ -995,6 +1079,7 @@ struct App {
     swapchain_framebuffers: Vec<vk::Framebuffer>,
     //
     command_pool: vk::CommandPool,
+    command_buffers: Vec<vk::CommandBuffer>,
 
     debug_utils_loader: ash::extensions::ext::DebugUtils,
     debug_utils_messenger: vk::DebugUtilsMessengerEXT,
@@ -1066,6 +1151,9 @@ impl App {
 
         let command_pool = create_command_pool(&logical_device, &queue_family_indices);
 
+        let command_buffers =
+            create_command_buffers(&logical_device, &swapchain_stuff, command_pool, render_pass, &framebuffers, pipeline);
+
         App {
             entry: entry,
             instance: instance,
@@ -1089,6 +1177,7 @@ impl App {
             swapchain_framebuffers: framebuffers,
             //
             command_pool: command_pool,
+            command_buffers: command_buffers,
 
             debug_utils_loader: debug_utils_loader,
             debug_utils_messenger: debug_utils_messenger,
