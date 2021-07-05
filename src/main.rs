@@ -687,13 +687,15 @@ fn create_graphics_pipeline(
     let vert_shader_module = create_shader_module(device, &vert_code);
     let frag_shader_module = create_shader_module(device, &frag_code);
 
+    let main_function_name = CString::new("main").unwrap();
+
     let vert_pp_shader_stage_ci = vk::PipelineShaderStageCreateInfo {
         s_type: vk::StructureType::PIPELINE_SHADER_STAGE_CREATE_INFO,
         p_next: ptr::null(),
         flags: vk::PipelineShaderStageCreateFlags::empty(),
         stage: vk::ShaderStageFlags::VERTEX,
         module: vert_shader_module,
-        p_name: "main".as_ptr() as *const i8,
+        p_name: main_function_name.as_ptr(),
         p_specialization_info: ptr::null(),
     };
 
@@ -701,9 +703,9 @@ fn create_graphics_pipeline(
         s_type: vk::StructureType::PIPELINE_SHADER_STAGE_CREATE_INFO,
         p_next: ptr::null(),
         flags: vk::PipelineShaderStageCreateFlags::empty(),
-        stage: vk::ShaderStageFlags::VERTEX,
+        stage: vk::ShaderStageFlags::FRAGMENT,
         module: frag_shader_module,
-        p_name: "main".as_ptr() as *const i8,
+        p_name: main_function_name.as_ptr(),
         p_specialization_info: ptr::null(),
     };
 
@@ -859,11 +861,6 @@ fn create_graphics_pipeline(
             .expect("Failed create pipeline layout.")
     };
 
-    unsafe {
-        device.destroy_shader_module(vert_shader_module, None);
-        device.destroy_shader_module(frag_shader_module, None);
-    };
-
     let pipeline_ci = vk::GraphicsPipelineCreateInfo::builder()
         .stages(&shader_stage_cis)
         .vertex_input_state(&vertex_input_ci)
@@ -882,6 +879,11 @@ fn create_graphics_pipeline(
         device
             .create_graphics_pipelines(vk::PipelineCache::null(), &[pipeline_ci], None)
             .expect("Failed to create graphics pipeline")
+    };
+
+    unsafe {
+        device.destroy_shader_module(vert_shader_module, None);
+        device.destroy_shader_module(frag_shader_module, None);
     };
 
     (graphics_pipelines[0], pp_layout)
@@ -913,6 +915,40 @@ fn create_shader_module(device: &ash::Device, shader_code: &Vec<u8>) -> vk::Shad
     }
 }
 
+fn create_framebuffer(
+    device: &ash::Device,
+    swapchain_stuff: &SwapChainStuff,
+    swapchain_image_views: &Vec<vk::ImageView>,
+    render_pass: vk::RenderPass,
+) -> Vec<vk::Framebuffer> {
+    let mut framebuffers = Vec::new();
+    for &image_view in swapchain_image_views.iter() {
+        let attachments = [image_view];
+
+        let framebuffer_ci = vk::FramebufferCreateInfo {
+            s_type: vk::StructureType::FRAMEBUFFER_CREATE_INFO,
+            p_next: ptr::null(),
+            flags: vk::FramebufferCreateFlags::empty(),
+            attachment_count: attachments.len() as u32,
+            p_attachments: attachments.as_ptr(),
+            width: swapchain_stuff.swapchain_extent.width,
+            height: swapchain_stuff.swapchain_extent.height,
+            render_pass: render_pass,
+            layers: 1,
+        };
+
+        let framebuffer = unsafe {
+            device
+                .create_framebuffer(&framebuffer_ci, None)
+                .expect("Failed to create framebuffer.")
+        };
+
+        framebuffers.push(framebuffer);
+    }
+
+    framebuffers
+}
+
 pub struct SurfaceStuff {
     surface_loader: ash::extensions::khr::Surface,
     surface_khr: vk::SurfaceKHR,
@@ -936,7 +972,9 @@ struct App {
     swapchain_image_views: Vec<vk::ImageView>,
     //
     pipeline_layout: vk::PipelineLayout,
+    graphic_pipeline: vk::Pipeline,
     render_pass: vk::RenderPass,
+    swapchain_framebuffers: Vec<vk::Framebuffer>,
 
     debug_utils_loader: ash::extensions::ext::DebugUtils,
     debug_utils_messenger: vk::DebugUtilsMessengerEXT,
@@ -998,6 +1036,9 @@ impl App {
 
         let (pipeline, pipeline_layout) =
             create_graphics_pipeline(&logical_device, &swapchain_stuff, render_pass);
+        
+        
+        let framebuffers = create_framebuffer(&logical_device, &swapchain_stuff, &swapchain_image_views, render_pass);
 
         App {
             entry: entry,
@@ -1016,8 +1057,10 @@ impl App {
             swapchain_extent: swapchain_stuff.swapchain_extent,
             swapchain_image_views: swapchain_image_views,
             //
-            render_pass: render_pass,
             pipeline_layout: pipeline_layout,
+            graphic_pipeline: pipeline,
+            render_pass: render_pass,
+            swapchain_framebuffers: framebuffers,
 
             debug_utils_loader: debug_utils_loader,
             debug_utils_messenger: debug_utils_messenger,
@@ -1116,6 +1159,10 @@ impl Drop for App {
             for &image_view in self.swapchain_image_views.iter() {
                 self.device.destroy_image_view(image_view, None);
             }
+            for framebuffer in self.swapchain_framebuffers.iter() {
+                self.device.destroy_framebuffer(*framebuffer, None);
+            }
+            self.device.destroy_pipeline(self.graphic_pipeline, None);
             self.device.destroy_render_pass(self.render_pass, None);
             self.device
                 .destroy_pipeline_layout(self.pipeline_layout, None);
