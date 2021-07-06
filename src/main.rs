@@ -619,6 +619,16 @@ fn create_render_pass(device: &ash::Device, swapchain_stuff: &SwapChainStuff) ->
         layout: vk::ImageLayout::COLOR_ATTACHMENT_OPTIMAL,
     }];
 
+    let dependencies = [vk::SubpassDependency {
+        src_subpass: vk::SUBPASS_EXTERNAL,
+        dst_subpass: 0,
+        src_stage_mask: vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
+        dst_stage_mask: vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT,
+        src_access_mask: vk::AccessFlags::empty(),
+        dst_access_mask: vk::AccessFlags::COLOR_ATTACHMENT_WRITE,
+        dependency_flags: vk::DependencyFlags::empty(),
+    }];
+
     let subpasses = [vk::SubpassDescription::builder()
         .pipeline_bind_point(vk::PipelineBindPoint::GRAPHICS)
         .color_attachments(&color_attachments_ref)
@@ -627,6 +637,7 @@ fn create_render_pass(device: &ash::Device, swapchain_stuff: &SwapChainStuff) ->
     let render_pass_ci = vk::RenderPassCreateInfo::builder()
         .attachments(&attachments)
         .subpasses(&subpasses)
+        .dependencies(&dependencies)
         .build();
 
     unsafe {
@@ -993,7 +1004,7 @@ fn create_command_buffers(
         let cmd_begin_info = vk::CommandBufferBeginInfo {
             s_type: vk::StructureType::COMMAND_BUFFER_BEGIN_INFO,
             p_next: ptr::null(),
-            flags: vk::CommandBufferUsageFlags::empty(),
+            flags: vk::CommandBufferUsageFlags::SIMULTANEOUS_USE,
             p_inheritance_info: ptr::null(),
         };
 
@@ -1020,15 +1031,14 @@ fn create_command_buffers(
             p_clear_values: clear_value.as_ptr(),
         };
 
-        let viewports = [
-            vk::Viewport { 
-                x: 0f32, y: 0f32,
-                width: swapchain_stuff.swapchain_extent.width as f32,
-                height: swapchain_stuff.swapchain_extent.height as f32,
-                min_depth: 0f32,
-                max_depth: 1f32,
-            },
-        ];
+        let viewports = [vk::Viewport {
+            x: 0f32,
+            y: 0f32,
+            width: swapchain_stuff.swapchain_extent.width as f32,
+            height: swapchain_stuff.swapchain_extent.height as f32,
+            min_depth: 0f32,
+            max_depth: 1f32,
+        }];
 
         unsafe {
             // render pass
@@ -1049,6 +1059,22 @@ fn create_command_buffers(
     }
 
     command_buffers
+}
+
+fn create_semaphore(device: &ash::Device) -> (vk::Semaphore, vk::Semaphore) {
+    let semaphor_ci = vk::SemaphoreCreateInfo::builder().build();
+    let image_avaliable_semaphore = unsafe {
+        device
+            .create_semaphore(&semaphor_ci, None)
+            .expect("Failed to create semaphore.")
+    };
+    let render_finished_semaphore = unsafe {
+        device
+            .create_semaphore(&semaphor_ci, None)
+            .expect("Failed to create semaphore.")
+    };
+
+    (image_avaliable_semaphore, render_finished_semaphore)
 }
 
 pub struct SurfaceStuff {
@@ -1080,6 +1106,9 @@ struct App {
     //
     command_pool: vk::CommandPool,
     command_buffers: Vec<vk::CommandBuffer>,
+
+    image_avaliable_semaphore: vk::Semaphore,
+    render_finished_semaphore: vk::Semaphore,
 
     debug_utils_loader: ash::extensions::ext::DebugUtils,
     debug_utils_messenger: vk::DebugUtilsMessengerEXT,
@@ -1151,8 +1180,17 @@ impl App {
 
         let command_pool = create_command_pool(&logical_device, &queue_family_indices);
 
-        let command_buffers =
-            create_command_buffers(&logical_device, &swapchain_stuff, command_pool, render_pass, &framebuffers, pipeline);
+        let command_buffers = create_command_buffers(
+            &logical_device,
+            &swapchain_stuff,
+            command_pool,
+            render_pass,
+            &framebuffers,
+            pipeline,
+        );
+
+        let (image_avaliable_semaphore, render_finished_semaphore) =
+            create_semaphore(&logical_device);
 
         App {
             entry: entry,
@@ -1178,6 +1216,8 @@ impl App {
             //
             command_pool: command_pool,
             command_buffers: command_buffers,
+            image_avaliable_semaphore: image_avaliable_semaphore,
+            render_finished_semaphore: render_finished_semaphore,
 
             debug_utils_loader: debug_utils_loader,
             debug_utils_messenger: debug_utils_messenger,
@@ -1267,24 +1307,84 @@ impl App {
 
     pub fn draw_frame(&mut self) {
         // println!("draw")
+        let (image_idx, _) = unsafe {
+            self.swapchain_loader
+                .acquire_next_image(
+                    self.swapchain_khr,
+                    u64::MAX,
+                    self.image_avaliable_semaphore,
+                    vk::Fence::null(),
+                )
+                .expect("Failed to acquire next image.")
+        };
+
+        let wait_semaphores = [self.image_avaliable_semaphore];
+        let wait_stages = [vk::PipelineStageFlags::COLOR_ATTACHMENT_OUTPUT];
+        let signal_semaphores = [self.render_finished_semaphore];
+
+        let submit_info = vk::SubmitInfo {
+            s_type: vk::StructureType::SUBMIT_INFO,
+            p_next: ptr::null(),
+            wait_semaphore_count: wait_semaphores.len() as u32,
+            p_wait_semaphores: wait_semaphores.as_ptr(),
+            p_wait_dst_stage_mask: wait_stages.as_ptr(),
+            command_buffer_count: 1,
+            p_command_buffers: &self.command_buffers[image_idx as usize],
+            signal_semaphore_count: signal_semaphores.len() as u32,
+            p_signal_semaphores: signal_semaphores.as_ptr(),
+        };
+
+        let swapchains = [self.swapchain_khr];
+
+        let present_info = vk::PresentInfoKHR {
+            s_type: vk::StructureType::PRESENT_INFO_KHR,
+            p_next: ptr::null(),
+            wait_semaphore_count: 1,
+            p_wait_semaphores: &self.render_finished_semaphore,
+            swapchain_count: swapchains.len() as u32,
+            p_swapchains: swapchains.as_ptr(),
+            p_image_indices: &image_idx,
+            p_results: ptr::null_mut(),
+        };
+
+        // submit to graphics queue
+        unsafe {
+            self.device
+                .queue_submit(self.graphics_queue, &[submit_info], vk::Fence::null())
+                .expect("Failed to queue submit.");
+            self.swapchain_loader
+                .queue_present(self.present_queue, &present_info)
+                .expect("Failed to queue present.");
+        }
     }
 }
 
 impl Drop for App {
     fn drop(&mut self) {
         unsafe {
-            for &image_view in self.swapchain_image_views.iter() {
-                self.device.destroy_image_view(image_view, None);
-            }
-
+            // self.device.queue_wait_idle(self.graphics_queue)
+            //     .expect("Failed to wait graphics queue idle");
+            // self.device.queue_wait_idle(self.present_queue)
+            //     .expect("Failed to wait present queue idle");
+            self.device
+                .device_wait_idle()
+                .expect("Failed to wait device idle");
+            self.device
+                .destroy_semaphore(self.image_avaliable_semaphore, None);
+            self.device
+                .destroy_semaphore(self.render_finished_semaphore, None);
             self.device.destroy_command_pool(self.command_pool, None);
             for framebuffer in self.swapchain_framebuffers.iter() {
                 self.device.destroy_framebuffer(*framebuffer, None);
             }
             self.device.destroy_pipeline(self.graphic_pipeline, None);
-            self.device.destroy_render_pass(self.render_pass, None);
             self.device
                 .destroy_pipeline_layout(self.pipeline_layout, None);
+            self.device.destroy_render_pass(self.render_pass, None);
+
+            for &image_view in self.swapchain_image_views.iter() {
+                self.device.destroy_image_view(image_view, None);
+            }
             self.swapchain_loader
                 .destroy_swapchain(self.swapchain_khr, None);
             self.device.destroy_device(None);
